@@ -6,6 +6,7 @@
 
 import { initClient } from '@/utils/redis';
 
+export const dynamic = 'force-dynamic';
 export async function GET() {
   const redis = await initClient();
   const shortUrlsStr = await redis?.get('short-urls');

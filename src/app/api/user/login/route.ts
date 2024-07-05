@@ -13,7 +13,6 @@ export async function POST(request: Request) {
   const { username, password } = await request.json();
   const [name, pass] = adminUser.split(':');
   if (name && name === username && pass === password) {
-    console.log('sign', { [username]: password }, jwtSecret);
     const token = jwt.sign({ [username]: password }, jwtSecret, { expiresIn: 86400 });
     return new Response(JSON.stringify({ status: 'success' }), {
       status: 200,
