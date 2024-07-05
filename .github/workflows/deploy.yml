@@ -51,10 +51,6 @@ jobs:
           pnpm -v
           pnpm install
 
-      # build
-      - name: Build
-        run: pnpm run build
-
         # Create .env
       - name: Create .env
         run: |
@@ -63,6 +59,11 @@ jobs:
           echo ADMIN_USER="${{ secrets.ADMIN_USER }}" >> .env
           echo JWT_SECRET="${{ secrets.JWT_SECRET }}" >> .env
         shell: bash
+
+      # build
+      - name: Build
+        run: pnpm run build
+
       # tar
       - name: Tar dist
         run: tar zcf build.tar.gz build public package.json pnpm-lock.yaml next.config.js
