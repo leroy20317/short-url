@@ -213,6 +213,7 @@ const Shorten = () => {
     {
       title: 'Original Url',
       dataIndex: 'original',
+      width: '50%',
       render: (text) => (
         <Typography.Link href={text} target="_blank">
           <Typography.Paragraph
