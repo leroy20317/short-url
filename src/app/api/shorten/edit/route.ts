@@ -4,7 +4,7 @@
  * @description：route
  */
 
-import { cookies, headers } from 'next/headers';
+import { cookies } from 'next/headers';
 import axios from 'axios';
 import { initClient } from '@/utils/redis';
 import dayjs from 'dayjs';
@@ -15,7 +15,9 @@ const verify = async () => {
     return false;
   }
   const baseUrl = process.env.__NEXT_PRIVATE_ORIGIN || 'http://localhost:5600';
-  const res = await axios.get(`${baseUrl}/api/user/check`, { headers: headers() as any });
+  const res = await axios.get(`${baseUrl}/api/user/check`, {
+    headers: { Cookie: cookieStore.toString() },
+  });
   return res.data.status === 'success';
 };
 

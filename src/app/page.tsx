@@ -22,8 +22,8 @@ const Home = () => {
   }
   return (
     <>
-      <header className="h-16 bg-gray-900 text-amber-50 px-6 text-lg flex items-center">
-        Short Url System
+      <header className="h-16 bg-gray-900 text-amber-50 px-12 text-lg flex items-center">
+        Short Link System
       </header>
       {isLogin ? <Shorten /> : <Login />}
     </>

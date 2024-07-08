@@ -17,8 +17,8 @@ const Login = () => {
     },
   });
   return (
-    <div className="flex-1 pt-48 px-6 flex flex-col justify-center items-center">
-      <h3 className="mb-4 text-2xl">Short Url System Login</h3>
+    <div className="flex-1 pt-[18%] px-12 flex flex-col justify-center items-center">
+      <h3 className="mb-4 text-2xl">Account Login</h3>
       <Card bordered={false} style={{ width: 'min(500px, 80vw)', height: 'max-content' }}>
         <Form size="large" action="/api/user/login" onFinish={run}>
           <Form.Item
@@ -34,11 +34,9 @@ const Login = () => {
             <Input.Password prefix={<LockOutlined />} placeholder="Password" />
           </Form.Item>
 
-          <Form.Item>
-            <Button type="primary" htmlType="submit" block loading={loading}>
-              Log in
-            </Button>
-          </Form.Item>
+          <Button type="primary" htmlType="submit" block loading={loading}>
+            Log in
+          </Button>
         </Form>
       </Card>
     </div>

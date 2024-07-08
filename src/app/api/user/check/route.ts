@@ -8,6 +8,7 @@ import { verifyToken } from '@/utils/util';
 const jwtSecret = process.env.JWT_SECRET || '';
 const adminUser = process.env.ADMIN_USER || '';
 
+export const dynamic = 'force-dynamic';
 export async function GET() {
   const cookieStore = cookies();
   const token = cookieStore.get('token')?.value || '';

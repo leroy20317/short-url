@@ -1,12 +1,12 @@
 import { RedoOutlined } from '@ant-design/icons';
 import type { TableColumnsType } from 'antd';
-import { App, Col, DatePicker, Form, Popconfirm, Row } from 'antd';
+import { App, Col, DatePicker, Flex, Form, Popconfirm, Row } from 'antd';
 import { Button, Input, Modal, Space, Table, Typography } from 'antd';
 import type { ElementRef } from 'react';
 import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
-import { useRequest } from 'ahooks';
+import { useRequest, useResponsive } from 'ahooks';
 import axios from 'axios';
 
 type DataType = {
@@ -24,16 +24,16 @@ const randomKey = (length = 6) => {
 };
 const EditModal = forwardRef<
   {
-    show: (data?: Omit<DataType, 'short' | 'clicks'>) => void;
-    delete: (key: string) => void;
+    edit: (data: { type: 'edit' | 'add'; key?: string }) => void;
+    delete: (key: string) => Promise<any>;
   },
-  { refresh: () => void }
->(({ refresh }, ref) => {
+  { refresh: () => void; list?: DataType[] }
+>(({ refresh, list }, ref) => {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [modalOpen, setModalOpen] = useState(false);
-  const [edit, setEdit] = useState(false);
-  const { loading, run } = useRequest((data) => axios.post('/api/shorten/edit', data), {
+  const [isEdit, setEdit] = useState(false);
+  const { loading, runAsync } = useRequest((data) => axios.post('/api/shorten/edit', data), {
     manual: true,
     onSuccess: (res) => {
       if (res.data.status === 'success') {
@@ -54,18 +54,21 @@ const EditModal = forwardRef<
   });
 
   useImperativeHandle(ref, () => ({
-    show: (data) => {
+    edit: ({ type, key }) => {
       setModalOpen(true);
-      setEdit(!!data);
-      if (data) {
-        form.setFieldsValue({
-          ...data,
-          expired: data.expired ? dayjs(data.expired) : undefined,
-        });
+      setEdit(type === 'edit');
+      if (key) {
+        const current = list?.find((ele) => ele.key === key);
+        if (current)
+          form.setFieldsValue({
+            key: current.key,
+            original: current.original,
+            expired: current.expired ? dayjs(current.expired) : undefined,
+          });
       }
     },
     delete: (key) => {
-      run({ type: 'delete', key });
+      return runAsync({ type: 'delete', key });
     },
   }));
 
@@ -73,7 +76,7 @@ const EditModal = forwardRef<
     <Modal
       open={modalOpen}
       onCancel={() => setModalOpen(false)}
-      okText={edit ? 'Edit' : 'Create'}
+      okText={isEdit ? 'Edit' : 'Create'}
       destroyOnClose
       okButtonProps={{ autoFocus: true, htmlType: 'submit', loading }}
       modalRender={(dom) => (
@@ -84,14 +87,36 @@ const EditModal = forwardRef<
           requiredMark={false}
           onFinish={({ key, original, expired }) => {
             const data = {
-              type: edit ? 'edit' : 'add',
+              type: isEdit ? 'edit' : 'add',
               key,
               short: `${window.location.origin}/${key}`,
               original,
               expired: expired?.format('YYYY-MM-DD HH:mm') || '',
             };
             console.log('data', data, expired);
-            run(data);
+            if (!isEdit) {
+              console.log('isEdit', isEdit, key, list);
+              const current = list?.find((ele) => ele.key === key);
+              if (current) {
+                Modal.confirm({
+                  title: `Whether to replace an existing ${key}`,
+                  content: (
+                    <>
+                      The original link is：
+                      <Typography.Link href={current.original} target="_blank" rel="noreferrer">
+                        {current.original}
+                      </Typography.Link>
+                    </>
+                  ),
+                  okText: 'Confirm',
+                  onOk: () => {
+                    return runAsync(data);
+                  },
+                });
+                return;
+              }
+            }
+            return runAsync(data);
           }}
         >
           {dom}
@@ -113,10 +138,10 @@ const EditModal = forwardRef<
             ]}
           >
             <Input
-              readOnly={edit}
+              readOnly={isEdit}
               maxLength={8}
               suffix={
-                !edit && (
+                !isEdit && (
                   <Typography.Link>
                     <RedoOutlined
                       onClick={() => {
@@ -150,8 +175,8 @@ const EditModal = forwardRef<
               return prevValues.key !== nextValues.key;
             }}
           >
-            {(f) => {
-              const key = f.getFieldValue('key');
+            {({ getFieldValue }) => {
+              const key = getFieldValue('key');
               if (!key) return '';
               return <Typography.Link>{`${window.location.origin}/${key}`}</Typography.Link>;
             }}
@@ -160,9 +185,9 @@ const EditModal = forwardRef<
         <Col span={24}>
           <Form.Item
             name="original"
-            label="Original Url"
+            label="Original Link"
             rules={[
-              { required: true, message: 'Please fill the original url!', whitespace: true },
+              { required: true, message: 'Please fill the original link!', whitespace: true },
               {
                 type: 'url',
                 message: 'Please fill in the correct original key!',
@@ -177,8 +202,17 @@ const EditModal = forwardRef<
   );
 });
 const Shorten = () => {
+  const { md } = useResponsive();
   const editModalRef = useRef<ElementRef<typeof EditModal>>(null);
-  const { data: res, loading, refresh } = useRequest(() => axios.get('/api/shorten/list'));
+  const {
+    data: res,
+    loading,
+    refresh,
+  } = useRequest(() => axios.get('/api/shorten/list'), {
+    onError: (e) => {
+      console.log('e', e);
+    },
+  });
   const [search, setSearch] = useState('');
   const data = useMemo<DataType[]>(() => {
     if (!search) {
@@ -194,28 +228,44 @@ const Shorten = () => {
       key: 'id',
       width: 60,
       render: (_, __, i) => i + 1,
-      responsive: ['sm'],
+      responsive: ['md'],
     },
     {
       title: 'Key',
       dataIndex: 'key',
-      responsive: ['md'],
+      width: md ? undefined : '25%',
+      render: (text) => {
+        if (md) {
+          return text;
+        }
+
+        return (
+          <Typography.Link
+            href={`${window.location.origin}/${text}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {text}
+          </Typography.Link>
+        );
+      },
     },
     {
-      title: 'Short Url',
+      title: 'Short Link',
       dataIndex: 'short',
+      responsive: ['md'],
       render: (text) => (
-        <Typography.Link href={text} target="_blank">
+        <Typography.Link href={text} target="_blank" rel="noreferrer">
           {text}
         </Typography.Link>
       ),
     },
     {
-      title: 'Original Url',
+      title: 'Original Link',
       dataIndex: 'original',
       width: '50%',
       render: (text) => (
-        <Typography.Link href={text} target="_blank">
+        <Typography.Link href={text} target="_blank" rel="noreferrer">
           <Typography.Paragraph
             style={{ marginBottom: 0, color: 'inherit' }}
             ellipsis={{ rows: 2 }}
@@ -246,13 +296,12 @@ const Shorten = () => {
       title: 'Actions',
       key: 'actions',
       render: (_, item) => (
-        <Space wrap>
+        <Space size={[16, 8]} wrap>
           <Typography.Link
             onClick={() => {
-              editModalRef.current?.show({
+              editModalRef.current?.edit({
+                type: 'edit',
                 key: item.key,
-                original: item.original,
-                expired: item.expired,
               });
             }}
           >
@@ -273,19 +322,19 @@ const Shorten = () => {
   ];
   return (
     <div className="flex-1 p-12">
-      <Space wrap>
-        <Button type="primary" onClick={() => editModalRef.current?.show()}>
-          创建短链
+      <Flex wrap gap="8px 16px">
+        <Button type="primary" onClick={() => editModalRef.current?.edit({ type: 'add' })}>
+          Create Link
         </Button>
         <Input.Search
-          placeholder="搜索短链/原始地址"
-          className="w-72"
-          enterButton="查询"
+          placeholder="Search Short/Original Link"
+          style={{ width: 'min(288px, 100%)' }}
+          enterButton="Search"
           onSearch={(value) => {
             setSearch(value);
           }}
         />
-      </Space>
+      </Flex>
       <Table
         loading={loading}
         bordered
@@ -295,7 +344,7 @@ const Shorten = () => {
         size="middle"
         pagination={false}
       />
-      <EditModal ref={editModalRef} refresh={refresh} />
+      <EditModal ref={editModalRef} refresh={refresh} list={res?.data.data} />
     </div>
   );
 };
