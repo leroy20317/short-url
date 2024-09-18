@@ -15,14 +15,11 @@ export async function GET(request: NextRequest) {
   }
 
   const redis = await initClient();
-  const shortUrlsStr = await redis?.get('short-urls');
-  const urls: { key: string; original: string; expired: string; clicks: number }[] = shortUrlsStr
-    ? JSON.parse(shortUrlsStr)
-    : [];
-  // Get the redirect entry from the redirects.json file
-  const i = urls.findIndex((ele) => ele.key === key);
+  const handleUrl: { key: string; original: string; expired: string; clicks: number } = JSON.parse(
+    (await redis?.hGet('short-urls', key)) || '{}',
+  );
 
-  const { original, expired } = urls[i];
+  const { original, expired } = handleUrl;
   // Account for bloom filter false positives
   if (!original) {
     return new Response('No Redirect', { status: 404 });
@@ -30,9 +27,14 @@ export async function GET(request: NextRequest) {
   if (expired && dayjs(expired) <= dayjs()) {
     return new Response('Url Expired', { status: 410 });
   }
-  urls[i].clicks += 1;
-
-  await redis?.set('short-urls', JSON.stringify(urls));
+  await redis?.hSet(
+    'short-urls',
+    key,
+    JSON.stringify({
+      ...handleUrl,
+      clicks: handleUrl.clicks + 1,
+    }),
+  );
 
   // Return the redirect entry
   return NextResponse.redirect(original);

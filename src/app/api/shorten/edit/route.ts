@@ -28,62 +28,45 @@ export async function POST(request: Request) {
       status: 401,
     });
   }
-  const data = await request.json();
+  const { key, type, ...data } = await request.json();
   const redis = await initClient();
-  const shortUrlsStr = await redis?.get('short-urls');
-  const urls: Record<string, string | number>[] = shortUrlsStr ? JSON.parse(shortUrlsStr) : [];
-  const i = urls.findIndex((ele) => ele.key === data.key);
-  switch (data.type) {
-    case 'delete':
-      // 删除
-      if (i > -1) {
-        urls.splice(i, 1);
-      } else {
-        return Response.json({
-          status: 'error',
-          message: '操作失败，未找到数据！',
-        });
-      }
-      break;
-    case 'edit':
-      // 修改
-      if (i > -1) {
-        urls[i] = {
-          ...urls[i],
-          original: data.original,
-          expired: data.expired,
-          update: dayjs().format('YYYY-MM-DD HH:mm'),
-        };
-      } else {
-        return Response.json({
-          status: 'error',
-          message: '操作失败，未找到数据！',
-        });
-      }
-      break;
-    case 'add':
-      // 新增
-      if (i > -1) {
-        //找到历史，更新数据
-        urls[i] = {
-          ...urls[i],
-          original: data.original,
-          expired: data.expired,
-          update: dayjs().format('YYYY-MM-DD HH:mm'),
-        };
-      } else {
-        urls.push({
-          key: data.key,
-          short: data.short,
-          original: data.original,
-          expired: data.expired,
-          update: dayjs().format('YYYY-MM-DD HH:mm'),
-          clicks: 0,
-        });
-      }
-      break;
+  if (type === 'add') {
+    await redis?.hSet(
+      'short-urls',
+      key,
+      JSON.stringify({
+        original: data.original,
+        expired: data.expired,
+        update: dayjs().format('YYYY-MM-DD HH:mm'),
+        clicks: 0,
+      }),
+    );
+    return Response.json({
+      status: 'success',
+    });
   }
-  await redis?.set('short-urls', JSON.stringify(urls));
+  const handleStr = await redis?.hGet('short-urls', key);
+  if (!handleStr) {
+    return Response.json({
+      status: 'error',
+      message: '操作失败，未找到数据！',
+    });
+  }
+  if (type === 'delete') {
+    await redis?.hDel('short-urls', key);
+  }
+  if (type === 'edit') {
+    await redis?.hSet(
+      'short-urls',
+      key,
+      JSON.stringify({
+        ...JSON.parse(handleStr),
+        original: data.original,
+        expired: data.expired,
+        update: dayjs().format('YYYY-MM-DD HH:mm'),
+      }),
+    );
+  }
 
   return Response.json({
     status: 'success',

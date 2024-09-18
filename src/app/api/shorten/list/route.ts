@@ -29,10 +29,14 @@ export async function GET() {
     });
   }
   const redis = await initClient();
-  const shortUrlsStr = await redis?.get('short-urls');
-  const urls: Record<string, string | number>[] = shortUrlsStr ? JSON.parse(shortUrlsStr) : [];
+  const shortUrls = (await redis?.hGetAll('short-urls')) || {};
   return Response.json({
     status: 'success',
-    data: urls,
+    data: Object.entries(shortUrls)
+      .map(([key, item]) => ({
+        key,
+        ...JSON.parse(item),
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key)),
   });
 }

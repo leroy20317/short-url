@@ -16,7 +16,7 @@ type DataType = {
   clicks: number;
   expired: string;
 };
-const randomKey = (length = 6) => {
+const randomKey = (length = 8) => {
   const characters = '123456789abcdefghijklmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ';
   return [...Array(length)].reduce((prev) => {
     return prev + characters.charAt(Math.floor(Math.random() * characters.length));
@@ -89,7 +89,6 @@ const EditModal = forwardRef<
             const data = {
               type: isEdit ? 'edit' : 'add',
               key,
-              short: `${window.location.origin}/${key}`,
               original,
               expired: expired?.format('YYYY-MM-DD HH:mm') || '',
             };
@@ -252,11 +251,15 @@ const Shorten = () => {
     },
     {
       title: 'Short Link',
-      dataIndex: 'short',
+      key: 'short',
       responsive: ['md'],
-      render: (text) => (
-        <Typography.Link href={text} target="_blank" rel="noreferrer">
-          {text}
+      render: (_, data) => (
+        <Typography.Link
+          href={`${window.location.origin}/${data.key}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {`${window.location.origin}/${data.key}`}
         </Typography.Link>
       ),
     },
@@ -327,7 +330,7 @@ const Shorten = () => {
           Create Link
         </Button>
         <Input.Search
-          placeholder="Search Short/Original Link"
+          placeholder="Search/Original Link"
           style={{ width: 'min(288px, 100%)' }}
           enterButton="Search"
           onSearch={(value) => {
