@@ -1,6 +1,6 @@
 'use client';
 import Login from '@/components/Login';
-import Shorten from '@/components/Shorten';
+import Main from 'src/components/Main';
 import { Spin } from 'antd';
 import axios from 'axios';
 import { useRequest } from 'ahooks';
@@ -25,7 +25,7 @@ const Home = () => {
       <header className="h-16 bg-gray-900 text-amber-50 px-12 text-lg flex items-center">
         短链系统
       </header>
-      {isLogin ? <Shorten /> : <Login />}
+      {isLogin ? <Main /> : <Login />}
     </>
   );
 };
