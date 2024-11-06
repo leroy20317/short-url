@@ -136,7 +136,7 @@ const EditModal = forwardRef<
           >
             <Input
               readOnly={isEdit}
-              maxLength={8}
+              maxLength={15}
               suffix={
                 !isEdit && (
                   <Typography.Link>
