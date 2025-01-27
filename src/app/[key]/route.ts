@@ -37,5 +37,5 @@ export async function GET(request: NextRequest) {
   );
 
   // Return the redirect entry
-  return NextResponse.rewrite(original);
+  return NextResponse.redirect(original);
 }
