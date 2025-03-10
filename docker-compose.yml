@@ -3,7 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: short-url:latest
+    image: short-url:latest # 定义镜像名称和标签
+    container_name: short-url # 容器名称
     ports:
       - '5600:5600'
     extra_hosts:
