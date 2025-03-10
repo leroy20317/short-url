@@ -1,7 +1,8 @@
 /**
- * @author: leroy
- * @date: 2024-07-03 16:02
- * @description：check
+ * @Author: leroy
+ * @Date: 2024-07-03 16:02:00
+ * @LastEditTime: 2025-03-10 10:32:10
+ * @Description: 用户校验
  */
 import { cookies } from 'next/headers';
 import { verifyToken } from '@/utils/util';
@@ -10,7 +11,7 @@ const adminUser = process.env.ADMIN_USER || '';
 
 export const dynamic = 'force-dynamic';
 export async function GET() {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const token = cookieStore.get('token')?.value || '';
   const decoded = await verifyToken(token, jwtSecret);
   if (!decoded) {

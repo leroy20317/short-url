@@ -1,16 +1,16 @@
-/**
- * @author: leroy
- * @date: 2024-07-04 17:20
- * @description：route
+/*
+ * @Author: leroy
+ * @Date: 2024-07-04 17:20:30
+ * @LastEditTime: 2025-03-10 10:31:20
+ * @Description: 短链编辑
  */
-
 import { cookies } from 'next/headers';
 import axios from 'axios';
 import { initClient } from '@/utils/redis';
 import dayjs from 'dayjs';
 
 const verify = async () => {
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   if (!cookieStore.get('token')) {
     return false;
   }
