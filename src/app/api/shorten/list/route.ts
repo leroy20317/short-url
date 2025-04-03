@@ -1,13 +1,13 @@
 /*
  * @Author: leroy
  * @Date: 2024-07-04 17:20:30
- * @LastEditTime: 2025-03-10 10:31:50
+ * @LastEditTime: 2025-04-03 14:44:22
  * @Description: 短链列表
  */
 
-import { initClient } from '@/utils/redis';
 import { cookies } from 'next/headers';
 import axios from 'axios';
+import { initPostgreSqlClient, linksSchema } from '@/utils/postgre';
 
 const verify = async () => {
   const cookieStore = await cookies();
@@ -29,15 +29,10 @@ export async function GET() {
       status: 401,
     });
   }
-  const redis = await initClient();
-  const shortUrls = (await redis?.hGetAll('short-urls')) || {};
+  const db = await initPostgreSqlClient();
+  const links = (await db?.select().from(linksSchema)) || [];
   return Response.json({
     status: 'success',
-    data: Object.entries(shortUrls)
-      .map(([key, item]) => ({
-        key,
-        ...JSON.parse(item),
-      }))
-      .sort((a, b) => a.key.localeCompare(b.key)),
+    data: links.sort((a, b) => a.key.localeCompare(b.key)),
   });
 }

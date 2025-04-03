@@ -1,12 +1,14 @@
-/**
- * @author: leroy
- * @date: 2024-07-05 16:30
- * @description：page
+/*
+ * @Author: leroy
+ * @Date: 2024-07-04 17:20:30
+ * @LastEditTime: 2025-04-03 14:44:22
+ * @Description: 跳转
  */
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { initClient } from '@/utils/redis';
 import dayjs from 'dayjs';
+import { initPostgreSqlClient, linksSchema } from '@/utils/postgre';
+import { eq } from 'drizzle-orm';
 
 export async function GET(request: NextRequest) {
   const key = request.nextUrl.pathname.substring(1);
@@ -14,12 +16,10 @@ export async function GET(request: NextRequest) {
     return new Response('Bad Request', { status: 400 });
   }
 
-  const redis = await initClient();
-  const handleUrl: { key: string; original: string; expired: string; clicks: number } = JSON.parse(
-    (await redis?.hGet('short-urls', key)) || '{}',
-  );
+  const db = await initPostgreSqlClient();
+  const { original, expired, clicks } =
+    (await db?.select().from(linksSchema).where(eq(linksSchema.key, key)))?.[0] || {};
 
-  const { original, expired } = handleUrl;
   // Account for bloom filter false positives
   if (!original) {
     return new Response('No Redirect', { status: 404 });
@@ -27,14 +27,12 @@ export async function GET(request: NextRequest) {
   if (expired && dayjs(expired) <= dayjs()) {
     return new Response('Url Expired', { status: 410 });
   }
-  await redis?.hSet(
-    'short-urls',
-    key,
-    JSON.stringify({
-      ...handleUrl,
-      clicks: handleUrl.clicks + 1,
-    }),
-  );
+  await db
+    ?.update(linksSchema)
+    .set({
+      clicks: (clicks || 0) + 1,
+    })
+    .where(eq(linksSchema.key, key));
 
   // Return the redirect entry
   return NextResponse.redirect(original);

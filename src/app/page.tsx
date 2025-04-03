@@ -1,6 +1,12 @@
+/*
+ * @Author: leroy
+ * @Date: 2024-07-03 14:00:56
+ * @LastEditTime: 2025-04-03 09:40:35
+ * @Description: Home Page
+ */
 'use client';
 import Login from '@/components/Login';
-import Main from 'src/components/Main';
+import Main from '@/components/Main';
 import { Spin } from 'antd';
 import axios from 'axios';
 import { useRequest } from 'ahooks';
@@ -20,14 +26,10 @@ const Home = () => {
   if (loading) {
     return <Spin fullscreen size="large" />;
   }
-  return (
-    <>
-      <header className="h-16 bg-gray-900 text-amber-50 px-12 text-lg flex items-center">
-        短链系统
-      </header>
-      {isLogin ? <Main /> : <Login />}
-    </>
-  );
+  if (isLogin) {
+    return <Main />;
+  }
+  return <Login />;
 };
 
 export default Home;
