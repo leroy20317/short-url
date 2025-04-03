@@ -46,8 +46,7 @@ jobs:
         # Create .env
       - name: Create .env
         run: |
-          echo REDIS_URL="${{ secrets.REDIS_URL }}" >> .env
-          echo REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" >> .env
+          echo DATABASE_URL="${{ secrets.DATABASE_URL }}" >> .env
           echo ADMIN_USER="${{ secrets.ADMIN_USER }}" >> .env
           echo JWT_SECRET="${{ secrets.JWT_SECRET }}" >> .env
         shell: bash

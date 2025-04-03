@@ -1,3 +1,7 @@
+networks:
+  1panel-network:
+    external: true
+
 services:
   short-url:
     build:
