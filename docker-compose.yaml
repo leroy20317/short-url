@@ -13,6 +13,8 @@ services:
       - '5600:5600'
     extra_hosts:
       - 'host.docker.internal:host-gateway'
+    networks:
+      - 1panel-network
     restart: always
     # 如果需要环境变量，可以添加：
     # environment:
