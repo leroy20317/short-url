@@ -57,7 +57,7 @@ jobs:
 
       # tar
       - name: Tar dist
-        run: tar zcf build.tar.gz --exclude=build/cache build public .env package.json pnpm-lock.yaml next.config.js Dockerfile docker-compose.yaml
+        run: tar zcf build.tar.gz --exclude=build/cache build public .env package.json pnpm-lock.yaml next.config.ts Dockerfile docker-compose.yaml
 
       # Deploy to server
       - name: Deploy to server
