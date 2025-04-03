@@ -1,12 +1,12 @@
 /*
  * @Author: leroy
  * @Date: 2024-07-03 09:20:56
- * @LastEditTime: 2025-04-03 15:05:22
- * @Description:
+ * @LastEditTime: 2025-04-03 15:22:10
+ * @Description: next config
  */
-import type { NextConfig } from 'next';
 
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   distDir: 'build',
   reactStrictMode: false,
 };
