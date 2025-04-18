@@ -82,9 +82,95 @@ jobs:
           key: ${{ secrets.ACCESS_TOKEN }}
           script: |
             cd /wwwroot/short-url
+            echo "Working directory: $(pwd)"
+
+            # --- 清理旧备份 (例如，只保留最近一次的备份) ---
+            echo "Cleaning up old backups (keeping the latest one if exists)..."
+            # 列出所有备份文件，按时间逆序，跳过最新的一个，然后删除其余的
+            ls -t backup_*.tar.gz | tail -n +2 | xargs -r rm -f || true
+
+            # --- 创建当前状态的备份 ---
+            BACKUP_FILENAME="backup_$(date +%Y%m%d%H%M%S).tar.gz"
+            # 定义需要备份的文件/目录列表
+            FILES_TO_BACKUP="build public .env package.json pnpm-lock.yaml next.config.js Dockerfile docker-compose.yaml" # 添加或删除你需要的文件/目录
+            echo "Creating backup of current state: $BACKUP_FILENAME"
+            # 使用 tar 创建备份
+            # c: create, z: gzip, f: file
+            # --ignore-failed-read: 如果列表中的某个文件/目录不存在，不会报错退出
+            tar czf "$BACKUP_FILENAME" $FILES_TO_BACKUP --ignore-failed-read
+            echo "Backup created."
+
+            # --- 部署新代码 ---
+            echo "Cleaning up old build directory..."
             rm -rf build
+
+            echo "Extracting new build..."
             tar zxf build.tar.gz
+            # 删除上传的压缩包
             rm build.tar.gz
-            docker-compose down
+
+            # --- 重启服务 ---
+            echo "Stopping existing services..."
+            # 使用 --remove-orphans 清理可能存在的孤儿容器
+            docker-compose down --remove-orphans || true
+
+            echo "Building and starting new services..."
             docker-compose up -d --build
-            echo "Complete!!!"
+
+            # --- 健康检查 ---
+            echo "Performing health check..."
+            sleep 15 # 等待应用启动
+            MAX_RETRIES=5
+            RETRY_DELAY=5
+            HEALTH_CHECK_URL="http://localhost:5600/api/health" # 确认健康检查URL和端口
+            HEALTH_CHECK_PASSED=false
+
+            for i in $(seq 1 $MAX_RETRIES); do
+                echo "Attempt $i/$MAX_RETRIES: Checking health at $HEALTH_CHECK_URL..."
+                if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 $HEALTH_CHECK_URL; then
+                    echo "Health check passed."
+                    HEALTH_CHECK_PASSED=true
+                    break
+                fi
+                if [ $i -lt $MAX_RETRIES ]; then
+                    echo "Health check failed. Retrying in $RETRY_DELAY seconds..."
+                    sleep $RETRY_DELAY
+                else
+                    echo "Health check failed after $MAX_RETRIES attempts."
+                fi
+            done
+
+            # --- 根据健康检查结果决定后续操作 ---
+            if [ "$HEALTH_CHECK_PASSED" != "true" ]; then
+                echo "Deployment failed due to health check failure. Attempting rollback..."
+                docker-compose down --remove-orphans || true # 确保新容器已停止
+
+                # 查找最新的备份文件
+                LATEST_BACKUP=$(ls -t backup_*.tar.gz | head -n 1)
+
+                if [ -f "$LATEST_BACKUP" ]; then
+                    echo "Restoring from backup: $LATEST_BACKUP"
+                    # 在解压备份前，清理掉当前可能不一致的文件（根据备份列表）
+                    # !! 确保这个列表和备份时一致 !!
+                    echo "Cleaning potentially inconsistent files before restore..."
+                    rm -rf build public .env package.json pnpm-lock.yaml next.config.js Dockerfile docker-compose.yaml || true
+
+                    # 解压备份文件，恢复到之前的状态
+                    tar xzf "$LATEST_BACKUP"
+
+                    echo "Restarting services from restored state..."
+                    # 使用恢复后的文件重新启动服务，通常不需要重新构建
+                    docker-compose up -d
+                    echo "Rollback complete. Please verify the application status."
+                else
+                    echo "Rollback failed: No backup file found!"
+                fi
+                exit 1 # 脚本以失败状态退出
+            else
+                # --- 健康检查通过，进行清理 ---
+                echo "Health check successful. Cleaning up unused Docker images..."
+                # 清理未使用的悬空镜像
+                docker image prune -f
+
+                echo "Deployment successful and cleanup complete!!!"
+            fi
