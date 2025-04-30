@@ -64,6 +64,7 @@ const EditModal = forwardRef<
             key: current.key,
             original: current.original,
             expired: current.expired ? dayjs(current.expired) : undefined,
+            title: current.title,
           });
           return;
         }
@@ -145,7 +146,7 @@ const EditModal = forwardRef<
             ]}
           >
             <Input
-              readOnly={isEdit}
+              disabled={isEdit}
               maxLength={15}
               className="rounded-lg"
               suffix={
@@ -240,8 +241,9 @@ const Main = () => {
 
   const columns: ProColumns<DataType>[] = [
     {
-      title: 'ID',
-      dataIndex: 'id',
+      title: '序号',
+      key: 'index',
+      render: (_, __, index) => index + 1,
       width: 60,
     },
     {
