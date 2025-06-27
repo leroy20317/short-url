@@ -8,7 +8,7 @@
 import { cookies } from 'next/headers';
 import axios from 'axios';
 import dayjs from 'dayjs';
-import { initPostgreSqlClient, linksSchema } from '@/utils/postgre';
+import { initPostgreSqlClient, linksSchema } from '@/utils/postgreSql';
 import { eq } from 'drizzle-orm';
 
 const verify = async () => {

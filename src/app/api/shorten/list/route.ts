@@ -7,7 +7,7 @@
 
 import { cookies } from 'next/headers';
 import axios from 'axios';
-import { initPostgreSqlClient, linksSchema } from '@/utils/postgre';
+import { initPostgreSqlClient, linksSchema } from '@/utils/postgreSql';
 
 const verify = async () => {
   const cookieStore = await cookies();

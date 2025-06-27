@@ -27,6 +27,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 生成版本号（基于时间）
+      - name: Generate version
+        id: version
+        run: |
+          VERSION=$(date +%Y%m%d%H%M%S)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version: $VERSION"
+
       - uses: pnpm/action-setup@v4
         name: Install pnpm
         with:
@@ -62,7 +70,7 @@ jobs:
       # Deploy to server
       - name: Deploy to server
         id: deploy
-        uses: appleboy/scp-action@v0.1.7
+        uses: appleboy/scp-action@master
         with:
           #host: "foo.com,bar.com"
           host: ${{ secrets.REMOTE_HOST }}
@@ -81,49 +89,88 @@ jobs:
           username: ${{ secrets.REMOTE_USER }}
           key: ${{ secrets.ACCESS_TOKEN }}
           script: |
+            # 进入工作目录
             cd /wwwroot/short-url
             echo "Working directory: $(pwd)"
 
-            # --- 清理旧备份 (例如，只保留最近一次的备份) ---
-            echo "Cleaning up old backups (keeping the latest one if exists)..."
-            # 列出所有备份文件，按时间逆序，跳过最新的一个，然后删除其余的
-            ls -t backup_*.tar.gz | tail -n +2 | xargs -r rm -f || true
-
-            # --- 创建当前状态的备份 ---
-            BACKUP_FILENAME="backup_$(date +%Y%m%d%H%M%S).tar.gz"
-            # 定义需要备份的文件/目录列表
-            FILES_TO_BACKUP="build public .env package.json pnpm-lock.yaml next.config.js Dockerfile docker-compose.yaml" # 添加或删除你需要的文件/目录
-            echo "Creating backup of current state: $BACKUP_FILENAME"
-            # 使用 tar 创建备份
-            # c: create, z: gzip, f: file
-            # --ignore-failed-read: 如果列表中的某个文件/目录不存在，不会报错退出
-            tar czf "$BACKUP_FILENAME" $FILES_TO_BACKUP --ignore-failed-read
-            echo "Backup created."
-
-            # --- 部署新代码 ---
-            echo "Cleaning up old build directory..."
-            rm -rf build
-
+            # 解压新版本文件
             echo "Extracting new build..."
             tar zxf build.tar.gz
-            # 删除上传的压缩包
             rm build.tar.gz
 
-            # --- 重启服务 ---
-            echo "Stopping existing services..."
-            # 使用 --remove-orphans 清理可能存在的孤儿容器
-            docker-compose down --remove-orphans || true
+            # =====================================================
+            # 配置变量集中定义区域
+            # =====================================================
 
-            echo "Building and starting new services..."
-            docker-compose up -d --build
+            # 基础配置
+            IMAGE_NAME="short-url"
+            VERSION=$(date +%Y%m%d%H%M%S)
 
-            # --- 健康检查 ---
-            echo "Performing health check..."
-            sleep 15 # 等待应用启动
-            MAX_RETRIES=5
-            RETRY_DELAY=5
-            HEALTH_CHECK_URL="http://localhost:5600/api/health" # 确认健康检查URL和端口
+            # 镜像标签定义
+            NEW_IMAGE_TAG="${IMAGE_NAME}:${VERSION}"
+            CURRENT_IMAGE_TAG="${IMAGE_NAME}:current"
+            PREVIOUS_IMAGE_TAG="${IMAGE_NAME}:previous"
+
+            # 健康检查配置
+            MAX_RETRIES=10
+            RETRY_DELAY=3
+            HEALTH_CHECK_URL="http://localhost:5600/api/health"
             HEALTH_CHECK_PASSED=false
+
+            # =====================================================
+            # 输出配置信息
+            # =====================================================
+            echo "Deploying version: $VERSION"
+            echo "Debug: IMAGE_NAME = '$IMAGE_NAME'"
+            echo "Debug: VERSION = '$VERSION'"
+            echo "Debug: NEW_IMAGE_TAG = '$NEW_IMAGE_TAG'"
+            echo "Debug: CURRENT_IMAGE_TAG = '$CURRENT_IMAGE_TAG'"
+            echo "Debug: PREVIOUS_IMAGE_TAG = '$PREVIOUS_IMAGE_TAG'"
+            echo "Debug: HEALTH_CHECK_URL = '$HEALTH_CHECK_URL'"
+
+            echo "Building new image: $NEW_IMAGE_TAG"
+
+            # 构建新镜像（带版本标签）
+            docker build -t "$NEW_IMAGE_TAG" .
+
+            # 检查当前是否有运行的容器
+            CURRENT_CONTAINER=$(docker ps -q --filter "name=${IMAGE_NAME}")
+
+            if [ ! -z "$CURRENT_CONTAINER" ]; then
+                echo "Found running container: $CURRENT_CONTAINER"
+
+                # 备份当前镜像标签
+                CURRENT_IMAGE=$(docker inspect --format='{{.Config.Image}}' $CURRENT_CONTAINER 2>/dev/null || echo "")
+                if [ ! -z "$CURRENT_IMAGE" ] && [ "$CURRENT_IMAGE" != "$NEW_IMAGE_TAG" ]; then
+                    echo "Backing up current image as previous: $CURRENT_IMAGE -> $PREVIOUS_IMAGE_TAG"
+                    docker tag "$CURRENT_IMAGE" "$PREVIOUS_IMAGE_TAG" 2>/dev/null || true
+                fi
+            fi
+
+            # 标记新镜像为当前版本
+            docker tag "$NEW_IMAGE_TAG" "$CURRENT_IMAGE_TAG"
+
+            # 更新 docker-compose.yaml 中的镜像标签
+            echo "Debug: Before sed - Current docker-compose.yaml image line:"
+            grep "image:" docker-compose.yaml
+            echo "Debug: CURRENT_IMAGE_TAG = '$CURRENT_IMAGE_TAG'"
+            echo "Debug: About to run sed command..."
+            sed -i "s|image: [^[:space:]#]*|image: ${CURRENT_IMAGE_TAG}|" docker-compose.yaml
+            echo "Debug: After sed - New docker-compose.yaml image line:"
+            grep "image:" docker-compose.yaml
+
+            # 使用 docker compose 进行零停机部署
+            echo "Starting zero-downtime deployment..."
+
+            # 重新创建并启动容器（这会先启动新容器，再停止旧容器）
+            docker compose up -d --force-recreate --remove-orphans
+
+            # 等待新容器启动
+            echo "Waiting for new container to start..."
+            sleep 10
+
+            # 健康检查
+            echo "Performing health check..."
 
             for i in $(seq 1 $MAX_RETRIES); do
                 echo "Attempt $i/$MAX_RETRIES: Checking health at $HEALTH_CHECK_URL..."
@@ -140,37 +187,49 @@ jobs:
                 fi
             done
 
-            # --- 根据健康检查结果决定后续操作 ---
+            # 处理部署结果
             if [ "$HEALTH_CHECK_PASSED" != "true" ]; then
-                echo "Deployment failed due to health check failure. Attempting rollback..."
-                docker-compose down --remove-orphans || true # 确保新容器已停止
+                echo "Deployment failed! Attempting rollback..."
 
-                # 查找最新的备份文件
-                LATEST_BACKUP=$(ls -t backup_*.tar.gz | head -n 1)
+                # 检查是否有之前的镜像可以回滚
+                if docker image inspect "$PREVIOUS_IMAGE_TAG" >/dev/null 2>&1; then
+                    echo "Rolling back to previous version: $PREVIOUS_IMAGE_TAG"
 
-                if [ -f "$LATEST_BACKUP" ]; then
-                    echo "Restoring from backup: $LATEST_BACKUP"
-                    # 在解压备份前，清理掉当前可能不一致的文件（根据备份列表）
-                    # !! 确保这个列表和备份时一致 !!
-                    echo "Cleaning potentially inconsistent files before restore..."
-                    rm -rf build public .env package.json pnpm-lock.yaml next.config.js Dockerfile docker-compose.yaml || true
+                    # 更新 docker-compose.yaml 使用之前的镜像
+                    sed -i "s|image: [^[:space:]#]*|image: ${PREVIOUS_IMAGE_TAG}|" docker-compose.yaml
 
-                    # 解压备份文件，恢复到之前的状态
-                    tar xzf "$LATEST_BACKUP"
+                    # 重新启动服务
+                    docker compose down --remove-orphans || true
+                    docker compose up -d
 
-                    echo "Restarting services from restored state..."
-                    # 使用恢复后的文件重新启动服务，通常不需要重新构建
-                    docker-compose up -d
-                    echo "Rollback complete. Please verify the application status."
+                    # 等待回滚完成
+                    sleep 10
+
+                    # 再次进行健康检查
+                    if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 $HEALTH_CHECK_URL; then
+                        echo "Rollback successful!"
+                    else
+                        echo "Rollback failed! Manual intervention required."
+                    fi
                 else
-                    echo "Rollback failed: No backup file found!"
+                    echo "No previous image available for rollback!"
                 fi
-                exit 1 # 脚本以失败状态退出
+
+                exit 1
             else
-                # --- 健康检查通过，进行清理 ---
-                echo "Health check successful. Cleaning up unused Docker images..."
-                # 清理未使用的悬空镜像
+                echo "Deployment successful!"
+
+                # 清理老旧镜像（只保留 current 和 previous 两个镜像）
+                echo "Cleaning up old images..."
+                # 删除除了 current 和 previous 之外的所有旧镜像
+                docker images "$IMAGE_NAME" --format "{{.Repository}}:{{.Tag}}" | \
+                grep -v -E ":current$|:previous$" | \
+                xargs -r docker rmi 2>/dev/null || true
+
+                # 清理悬空镜像
                 docker image prune -f
 
-                echo "Deployment successful and cleanup complete!!!"
+                echo "Deployment completed successfully!"
+                echo "Current version: $VERSION"
+                echo "Image: $NEW_IMAGE_TAG"
             fi

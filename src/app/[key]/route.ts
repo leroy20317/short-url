@@ -7,7 +7,7 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import dayjs from 'dayjs';
-import { initPostgreSqlClient, linksSchema } from '@/utils/postgre';
+import { initPostgreSqlClient, linksSchema } from '@/utils/postgreSql';
 import { eq } from 'drizzle-orm';
 
 export async function GET(request: NextRequest) {
