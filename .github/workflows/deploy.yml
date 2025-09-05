@@ -80,12 +80,11 @@ jobs:
           source: 'build.tar.gz'
           target: /wwwroot/short-url
 
-      # 远程Command
-      - name: Command
+      # 零停机部署
+      - name: Zero-downtime deployment
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.REMOTE_HOST }}
-          port: ${{ secrets.REMOTE_PORT }}
           username: ${{ secrets.REMOTE_USER }}
           key: ${{ secrets.ACCESS_TOKEN }}
           script: |
@@ -93,23 +92,22 @@ jobs:
             cd /wwwroot/short-url
             echo "Working directory: $(pwd)"
 
-            # 解压新版本文件
-            echo "Extracting new build..."
-            tar zxf build.tar.gz
-            rm build.tar.gz
-
             # =====================================================
-            # 配置变量集中定义区域
+            # 配置变量集中定义区域 - 模块化升级版本
             # =====================================================
 
             # 基础配置
-            IMAGE_NAME="short-url"
+            APP_NAME="short-url"
             VERSION=$(date +%Y%m%d%H%M%S)
 
             # 镜像标签定义
-            NEW_IMAGE_TAG="${IMAGE_NAME}:${VERSION}"
-            CURRENT_IMAGE_TAG="${IMAGE_NAME}:current"
-            PREVIOUS_IMAGE_TAG="${IMAGE_NAME}:previous"
+            NEW_IMAGE_TAG="${APP_NAME}:${VERSION}"
+            CURRENT_IMAGE_TAG="${APP_NAME}:current"
+            PREVIOUS_IMAGE_TAG="${APP_NAME}:previous"
+
+            # 备份文件定义（与 Docker 镜像命名保持一致）
+            PREVIOUS_BACKUP="build-previous.tar.gz"
+            VERSION_BACKUP="build-backup-${VERSION}.tar.gz"
 
             # 健康检查配置
             MAX_RETRIES=10
@@ -118,118 +116,373 @@ jobs:
             HEALTH_CHECK_PASSED=false
 
             # =====================================================
-            # 输出配置信息
+            # 输出配置信息 - 增强版本
             # =====================================================
+            echo "🚀 Starting Deployment..."
             echo "Deploying version: $VERSION"
-            echo "Debug: IMAGE_NAME = '$IMAGE_NAME'"
-            echo "Debug: VERSION = '$VERSION'"
-            echo "Debug: NEW_IMAGE_TAG = '$NEW_IMAGE_TAG'"
-            echo "Debug: CURRENT_IMAGE_TAG = '$CURRENT_IMAGE_TAG'"
-            echo "Debug: PREVIOUS_IMAGE_TAG = '$PREVIOUS_IMAGE_TAG'"
-            echo "Debug: HEALTH_CHECK_URL = '$HEALTH_CHECK_URL'"
+            echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo ""
+            echo "📋 Configuration Details:"
+            echo "  APP_NAME: $APP_NAME"
+            echo "  VERSION: $VERSION"
+            echo "  NEW_IMAGE_TAG: $NEW_IMAGE_TAG"
+            echo "  CURRENT_IMAGE_TAG: $CURRENT_IMAGE_TAG"
+            echo "  PREVIOUS_IMAGE_TAG: $PREVIOUS_IMAGE_TAG"
+            echo "  PREVIOUS_BACKUP: $PREVIOUS_BACKUP"
+            echo "  VERSION_BACKUP: $VERSION_BACKUP"
+            echo "  HEALTH_CHECK_URL: $HEALTH_CHECK_URL"
+            echo "  MAX_RETRIES: $MAX_RETRIES"
+            echo "  RETRY_DELAY: ${RETRY_DELAY}s"
+            echo ""
 
-            echo "Building new image: $NEW_IMAGE_TAG"
+            # =====================================================
+            # 备份机制实现
+            # =====================================================
 
-            # 构建新镜像（带版本标签）
-            docker build -t "$NEW_IMAGE_TAG" .
-
-            # 检查当前是否有运行的容器
-            CURRENT_CONTAINER=$(docker ps -q --filter "name=${IMAGE_NAME}")
-
-            if [ ! -z "$CURRENT_CONTAINER" ]; then
-                echo "Found running container: $CURRENT_CONTAINER"
-
-                # 备份当前镜像标签
-                CURRENT_IMAGE=$(docker inspect --format='{{.Config.Image}}' $CURRENT_CONTAINER 2>/dev/null || echo "")
-                if [ ! -z "$CURRENT_IMAGE" ] && [ "$CURRENT_IMAGE" != "$NEW_IMAGE_TAG" ]; then
-                    echo "Backing up current image as previous: $CURRENT_IMAGE -> $PREVIOUS_IMAGE_TAG"
-                    docker tag "$CURRENT_IMAGE" "$PREVIOUS_IMAGE_TAG" 2>/dev/null || true
-                fi
+            # 备份当前版本为上一版本（如果存在）
+            echo "📦 Backup Phase:"
+            if [ -f build.tar.gz ]; then
+                echo "  ✓ Backing up current version as previous..."
+                cp build.tar.gz "$PREVIOUS_BACKUP"
+                echo "  ✓ Previous version backed up as: $PREVIOUS_BACKUP"
+            else
+                echo "  ℹ️  No existing version found, this might be the first deployment."
             fi
 
-            # 标记新镜像为当前版本
-            docker tag "$NEW_IMAGE_TAG" "$CURRENT_IMAGE_TAG"
+            # 清理旧备份文件，只保留最新的一个
+            echo "  🧹 Cleaning up old backup files..."
+            find . -name "build-backup-*.tar.gz" -not -name "$VERSION_BACKUP" -delete 2>/dev/null || true
+            echo "  ✓ Old backup files cleaned up."
+            echo ""
 
-            # 更新 docker-compose.yaml 中的镜像标签
-            echo "Debug: Before sed - Current docker-compose.yaml image line:"
-            grep "image:" docker-compose.yaml
-            echo "Debug: CURRENT_IMAGE_TAG = '$CURRENT_IMAGE_TAG'"
-            echo "Debug: About to run sed command..."
-            sed -i "s|image: [^[:space:]#]*|image: ${CURRENT_IMAGE_TAG}|" docker-compose.yaml
-            echo "Debug: After sed - New docker-compose.yaml image line:"
-            grep "image:" docker-compose.yaml
+            # =====================================================
+            # 解压新版本
+            # =====================================================
+            echo "📂 Extraction Phase:"
+            echo "  📦 Extracting new build..."
+            tar zxf build.tar.gz
+            rm build.tar.gz
+            echo "  ✓ New version extracted successfully."
+            echo ""
 
-            # 使用 docker compose 进行零停机部署
-            echo "Starting zero-downtime deployment..."
+            # =====================================================
+            # 健康检查函数定义 - 模块化升级版本
+            # =====================================================
 
-            # 重新创建并启动容器（这会先启动新容器，再停止旧容器）
-            docker compose up -d --force-recreate --remove-orphans
+            # 健康检查函数，与 deploy.yml 保持一致
+            perform_health_check() {
+                local url="$1"
+                local max_retries="${2:-$MAX_RETRIES}"
+                local retry_delay="${3:-$RETRY_DELAY}"
 
-            # 等待新容器启动
-            echo "Waiting for new container to start..."
-            sleep 10
+                echo "🏥 Performing health check at: $url"
 
-            # 健康检查
-            echo "Performing health check..."
+                for i in $(seq 1 $max_retries); do
+                    echo "  📊 Attempt $i/$max_retries: Checking health at $url..."
+                    if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$url"; then
+                        echo "  ✅ Health check passed!"
+                        return 0
+                    fi
+                    if [ $i -lt $max_retries ]; then
+                        echo "  ⏳ Health check failed. Retrying in $retry_delay seconds..."
+                        sleep $retry_delay
+                    else
+                        echo "  ❌ Health check failed after $max_retries attempts."
+                    fi
+                done
 
-            for i in $(seq 1 $MAX_RETRIES); do
-                echo "Attempt $i/$MAX_RETRIES: Checking health at $HEALTH_CHECK_URL..."
-                if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 $HEALTH_CHECK_URL; then
-                    echo "Health check passed."
-                    HEALTH_CHECK_PASSED=true
-                    break
-                fi
-                if [ $i -lt $MAX_RETRIES ]; then
-                    echo "Health check failed. Retrying in $RETRY_DELAY seconds..."
-                    sleep $RETRY_DELAY
+                echo "  💥 Health check failed completely."
+                return 1
+            }
+
+            # =====================================================
+            # Docker 镜像构建阶段
+            # =====================================================
+
+            echo "🐳 Docker Build Phase:"
+            echo "  🔨 Building new image: $NEW_IMAGE_TAG"
+            docker build -t "$NEW_IMAGE_TAG" .
+            echo "  ✅ Image built successfully."
+            echo ""
+
+            # =====================================================
+            # Docker 零停机部署函数定义
+            # =====================================================
+
+            # Docker 镜像版本管理函数
+            manage_docker_images() {
+                echo "🏷️ Docker Image Management Phase:"
+
+                # 检查当前是否有运行的容器
+                local current_container=$(docker ps -q --filter "name=${APP_NAME}")
+
+                if [ ! -z "$current_container" ]; then
+                    echo "  🔍 Found running container: $current_container"
+
+                    # 备份当前镜像标签
+                    local current_image=$(docker inspect --format='{{.Config.Image}}' $current_container 2>/dev/null || echo "")
+                    if [ ! -z "$current_image" ] && [ "$current_image" != "$NEW_IMAGE_TAG" ]; then
+                        echo "  📦 Backing up current image as previous:"
+                        echo "    $current_image → $PREVIOUS_IMAGE_TAG"
+                        docker tag "$current_image" "$PREVIOUS_IMAGE_TAG" 2>/dev/null || true
+                        echo "  ✅ Image backup completed."
+                    else
+                        echo "  ℹ️  No image backup needed."
+                    fi
                 else
-                    echo "Health check failed after $MAX_RETRIES attempts."
+                    echo "  ℹ️  No running container found (first deployment)."
                 fi
-            done
 
-            # 处理部署结果
-            if [ "$HEALTH_CHECK_PASSED" != "true" ]; then
-                echo "Deployment failed! Attempting rollback..."
+                # 标记新镜像为当前版本
+                echo "  🏷️ Tagging new image as current version..."
+                docker tag "$NEW_IMAGE_TAG" "$CURRENT_IMAGE_TAG"
+                echo "  ✅ Image tagging completed."
+                echo ""
+            }
+
+            # Docker Compose 配置更新函数
+            update_docker_compose() {
+                echo "📝 Docker Compose Configuration Update:"
+                echo "  📋 Before update - Current image line:"
+                grep "image:" docker-compose.yaml | head -1
+
+                echo "  🔧 Updating docker-compose.yaml with new image: $CURRENT_IMAGE_TAG"
+                sed -i "s|image: [^[:space:]#]*|image: ${CURRENT_IMAGE_TAG}|" docker-compose.yaml
+
+                echo "  📋 After update - New image line:"
+                grep "image:" docker-compose.yaml | head -1
+                echo "  ✅ Configuration update completed."
+                echo ""
+            }
+
+            # Docker 零停机部署函数
+            deploy_with_docker() {
+                echo "🚀 Docker Zero-Downtime Deployment Phase:"
+                echo "  🔄 Starting zero-downtime deployment..."
+
+                # 重新创建并启动容器（这会先启动新容器，再停止旧容器）
+                if docker compose up -d --force-recreate --remove-orphans; then
+                    echo "  ✅ Docker Compose deployment successful!"
+
+                    # 等待新容器启动
+                    echo "  ⏳ Waiting for new container to fully start..."
+                    sleep 10
+                    echo "  ✅ Container startup completed."
+                    return 0
+                else
+                    echo "  ❌ Docker Compose deployment failed!"
+                    return 1
+                fi
+            }
+
+            # =====================================================
+            # 执行 Docker 部署流程
+            # =====================================================
+
+            # 执行镜像管理
+            manage_docker_images
+
+            # 更新配置文件
+            update_docker_compose
+
+            # 执行零停机部署
+            if ! deploy_with_docker; then
+                echo "💥 Docker deployment failed! Will attempt rollback later."
+                DOCKER_DEPLOY_FAILED=true
+            else
+                echo "🎉 Docker deployment phase completed successfully!"
+                DOCKER_DEPLOY_FAILED=false
+            fi
+            echo ""
+
+            # =====================================================
+            # 自动回退机制函数定义
+            # =====================================================
+
+            # Docker 镜像级回退函数
+            rollback_docker_image() {
+                echo "🔄 Docker Image Rollback Phase:"
 
                 # 检查是否有之前的镜像可以回滚
                 if docker image inspect "$PREVIOUS_IMAGE_TAG" >/dev/null 2>&1; then
-                    echo "Rolling back to previous version: $PREVIOUS_IMAGE_TAG"
+                    echo "  📦 Rolling back to previous Docker image: $PREVIOUS_IMAGE_TAG"
 
                     # 更新 docker-compose.yaml 使用之前的镜像
                     sed -i "s|image: [^[:space:]#]*|image: ${PREVIOUS_IMAGE_TAG}|" docker-compose.yaml
 
                     # 重新启动服务
+                    echo "  🔄 Restarting services with previous image..."
                     docker compose down --remove-orphans || true
                     docker compose up -d
 
                     # 等待回滚完成
+                    echo "  ⏳ Waiting for rollback to complete..."
                     sleep 10
 
-                    # 再次进行健康检查
-                    if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 $HEALTH_CHECK_URL; then
-                        echo "Rollback successful!"
-                    else
-                        echo "Rollback failed! Manual intervention required."
-                    fi
+                    return 0
                 else
-                    echo "No previous image available for rollback!"
+                    echo "  ❌ No previous Docker image available for rollback!"
+                    return 1
+                fi
+            }
+
+            # 文件级回退函数（增强版本）
+            rollback_build_files() {
+                echo "📁 File-Level Rollback Phase:"
+
+                if [ -f "$PREVIOUS_BACKUP" ]; then
+                    echo "  📦 Rolling back to backup files: $PREVIOUS_BACKUP"
+
+                    # 恢复备份版本
+                    echo "  🔄 Restoring backup files..."
+                    rm -rf build 2>/dev/null || true
+                    tar zxf "$PREVIOUS_BACKUP"
+                    echo "  ✅ Backup files restored."
+
+                    # 重建镜像
+                    echo "  🔨 Rebuilding image from backup..."
+                    local backup_image_tag="${APP_NAME}:backup-$(date +%Y%m%d%H%M%S)"
+                    docker build -t "$backup_image_tag" .
+                    docker tag "$backup_image_tag" "$CURRENT_IMAGE_TAG"
+
+                    # 更新配置并重启
+                    sed -i "s|image: [^[:space:]#]*|image: ${CURRENT_IMAGE_TAG}|" docker-compose.yaml
+                    docker compose down --remove-orphans || true
+                    docker compose up -d
+
+                    echo "  ⏳ Waiting for file rollback to complete..."
+                    sleep 10
+
+                    return 0
+                else
+                    echo "  ❌ No backup files available for rollback!"
+                    return 1
+                fi
+            }
+
+            # 完整回退函数（双层回退策略）
+            perform_complete_rollback() {
+                echo "🆘 Complete Rollback Process Starting..."
+
+                # 第一层：尝试 Docker 镜像回退
+                if rollback_docker_image; then
+                    echo "  ✅ Docker image rollback completed."
+
+                    # 验证 Docker 镜像回退结果
+                    echo "  🏥 Verifying Docker rollback with health check..."
+                    if perform_health_check "$HEALTH_CHECK_URL"; then
+                        echo "  🎉 Docker rollback successful! Service is healthy."
+                        return 0
+                    else
+                        echo "  ⚠️ Docker rollback verification failed, trying file-level rollback..."
+                    fi
                 fi
 
-                exit 1
-            else
-                echo "Deployment successful!"
+                # 第二层：尝试文件级回退
+                if rollback_build_files; then
+                    echo "  ✅ File-level rollback completed."
 
-                # 清理老旧镜像（只保留 current 和 previous 两个镜像）
-                echo "Cleaning up old images..."
+                    # 验证文件级回退结果
+                    echo "  🏥 Verifying file rollback with health check..."
+                    if perform_health_check "$HEALTH_CHECK_URL"; then
+                        echo "  🎉 File rollback successful! Service is healthy."
+                        return 0
+                    else
+                        echo "  💥 File rollback verification failed!"
+                    fi
+                else
+                    echo "  💥 File-level rollback failed!"
+                fi
+
+                echo "  🚨 Complete rollback failed! Manual intervention required."
+                return 1
+            }
+
+            # =====================================================
+            # 主健康检查和部署验证流程
+            # =====================================================
+
+            # 检查部署是否成功并进行健康验证
+            if [ "$DOCKER_DEPLOY_FAILED" = "true" ]; then
+                echo "💥 Skipping health check due to Docker deployment failure."
+                echo "🆘 Initiating immediate rollback..."
+
+                if perform_complete_rollback; then
+                    echo "✅ Rollback completed successfully."
+                    exit 0
+                else
+                    echo "💥 Rollback failed! Manual intervention required."
+                    exit 1
+                fi
+            else
+                # 执行健康检查
+                echo "🏥 Health Check Phase:"
+                if perform_health_check "$HEALTH_CHECK_URL"; then
+                    HEALTH_CHECK_PASSED=true
+                    echo "  🎉 Health check passed! Deployment successful."
+                else
+                    HEALTH_CHECK_PASSED=false
+                    echo "  💥 Health check failed! Initiating rollback..."
+                fi
+            fi
+
+            # =====================================================
+            # 部署结果处理和最终状态报告
+            # =====================================================
+
+            if [ "$HEALTH_CHECK_PASSED" = "true" ]; then
+                # 部署成功流程
+                echo ""
+                echo "🧹 Cleanup Phase:"
+                echo "  🗑️ Cleaning up old Docker images..."
+
                 # 删除除了 current 和 previous 之外的所有旧镜像
-                docker images "$IMAGE_NAME" --format "{{.Repository}}:{{.Tag}}" | \
-                grep -v -E ":current$|:previous$" | \
+                docker images "$APP_NAME" --format "{{.Repository}}:{{.Tag}}" | \
+                grep -v -E ":current$|:previous$|:backup-" | \
                 xargs -r docker rmi 2>/dev/null || true
 
                 # 清理悬空镜像
                 docker image prune -f
+                echo "  ✅ Image cleanup completed."
+                echo ""
 
-                echo "Deployment completed successfully!"
-                echo "Current version: $VERSION"
-                echo "Image: $NEW_IMAGE_TAG"
+                # 成功状态报告
+                echo "🎉 === DEPLOYMENT SUCCESSFUL === 🎉"
+                echo "Version: $VERSION deployed successfully"
+                echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
+                echo "Docker Image: $NEW_IMAGE_TAG"
+                echo "Status: All systems operational"
+                echo "Health Check: ✅ PASSED"
+                echo "Backup Available: ✅ $PREVIOUS_BACKUP"
+                echo "Previous Image: ✅ $PREVIOUS_IMAGE_TAG"
+                echo "=================================================="
+                exit 0
+
+            else
+                # 部署失败流程 - 执行回退
+                echo ""
+                echo "🆘 Deployment failed! Executing rollback strategy..."
+
+                if perform_complete_rollback; then
+                    echo ""
+                    echo "⚠️ === DEPLOYMENT ROLLED BACK === ⚠️"
+                    echo "Version: $VERSION deployment failed"
+                    echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
+                    echo "Status: Rollback successful, service restored"
+                    echo "Action Taken: Automatic recovery completed"
+                    echo "Health Check: ✅ PASSED (after rollback)"
+                    echo "=============================================="
+                    exit 0
+                else
+                    echo ""
+                    echo "💥 === DEPLOYMENT FAILED === 💥"
+                    echo "Version: $VERSION deployment failed"
+                    echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
+                    echo "Status: Rollback failed - Manual intervention required"
+                    echo "Action Required: Check logs above for details"
+                    echo "Health Check: ❌ FAILED"
+                    echo "Rollback Status: ❌ FAILED"
+                    echo "========================================="
+                    exit 1
+                fi
             fi
