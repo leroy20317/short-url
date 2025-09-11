@@ -105,9 +105,11 @@ jobs:
             CURRENT_IMAGE_TAG="${APP_NAME}:current"
             PREVIOUS_IMAGE_TAG="${APP_NAME}:previous"
 
-            # 备份文件定义（与 Docker 镜像命名保持一致）
-            PREVIOUS_BACKUP="build-previous.tar.gz"
-            VERSION_BACKUP="build-backup-${VERSION}.tar.gz"
+            # 备份文件定义（时间戳命名 - 部署成功后备份策略）
+            # 格式: build-backup-YYYYMMDDHHMMSS.tar.gz
+            # 策略: 只备份部署成功的版本，保留最近2份
+            BACKUP_TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            VERSION_BACKUP="build-backup-${BACKUP_TIMESTAMP}.tar.gz"
 
             # 健康检查配置
             MAX_RETRIES=10
@@ -120,6 +122,7 @@ jobs:
             # =====================================================
             echo "🚀 Starting Deployment..."
             echo "Deploying version: $VERSION"
+            echo "Environment: PRODUCTION"
             echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
             echo ""
             echo "📋 Configuration Details:"
@@ -128,7 +131,6 @@ jobs:
             echo "  NEW_IMAGE_TAG: $NEW_IMAGE_TAG"
             echo "  CURRENT_IMAGE_TAG: $CURRENT_IMAGE_TAG"
             echo "  PREVIOUS_IMAGE_TAG: $PREVIOUS_IMAGE_TAG"
-            echo "  PREVIOUS_BACKUP: $PREVIOUS_BACKUP"
             echo "  VERSION_BACKUP: $VERSION_BACKUP"
             echo "  HEALTH_CHECK_URL: $HEALTH_CHECK_URL"
             echo "  MAX_RETRIES: $MAX_RETRIES"
@@ -136,33 +138,12 @@ jobs:
             echo ""
 
             # =====================================================
-            # 备份机制实现
-            # =====================================================
-
-            # 备份当前版本为上一版本（如果存在）
-            echo "📦 Backup Phase:"
-            if [ -f build.tar.gz ]; then
-                echo "  ✓ Backing up current version as previous..."
-                cp build.tar.gz "$PREVIOUS_BACKUP"
-                echo "  ✓ Previous version backed up as: $PREVIOUS_BACKUP"
-            else
-                echo "  ℹ️  No existing version found, this might be the first deployment."
-            fi
-
-            # 清理旧备份文件，只保留最新的一个
-            echo "  🧹 Cleaning up old backup files..."
-            find . -name "build-backup-*.tar.gz" -not -name "$VERSION_BACKUP" -delete 2>/dev/null || true
-            echo "  ✓ Old backup files cleaned up."
-            echo ""
-
-            # =====================================================
-            # 解压新版本
+            # 解压新版本（保留build.tar.gz用于后续备份）
             # =====================================================
             echo "📂 Extraction Phase:"
             echo "  📦 Extracting new build..."
             tar zxf build.tar.gz
-            rm build.tar.gz
-            echo "  ✓ New version extracted successfully."
+            echo "  ✓ New version extracted successfully (build.tar.gz preserved for backup)."
             echo ""
 
             # =====================================================
@@ -330,13 +311,16 @@ jobs:
             rollback_build_files() {
                 echo "📁 File-Level Rollback Phase:"
 
-                if [ -f "$PREVIOUS_BACKUP" ]; then
-                    echo "  📦 Rolling back to backup files: $PREVIOUS_BACKUP"
+                # 查找最新的备份文件
+                LATEST_BACKUP=$(ls -t build-backup-*.tar.gz 2>/dev/null | head -1)
+
+                if [ -n "$LATEST_BACKUP" ] && [ -f "$LATEST_BACKUP" ]; then
+                    echo "  📦 Rolling back to latest backup: $LATEST_BACKUP"
 
                     # 恢复备份版本
                     echo "  🔄 Restoring backup files..."
                     rm -rf build 2>/dev/null || true
-                    tar zxf "$PREVIOUS_BACKUP"
+                    tar zxf "$LATEST_BACKUP"
                     echo "  ✅ Backup files restored."
 
                     # 重建镜像
@@ -433,7 +417,24 @@ jobs:
             if [ "$HEALTH_CHECK_PASSED" = "true" ]; then
                 # 部署成功流程
                 echo ""
-                echo "🧹 Cleanup Phase:"
+                echo "📦 Post-Deployment Backup Phase:"
+                echo "  ✓ Creating timestamped backup..."
+                if [ -f build.tar.gz ]; then
+                    cp build.tar.gz "$VERSION_BACKUP"
+                    echo "  ✓ New version backed up as: $VERSION_BACKUP"
+                    rm build.tar.gz
+                    echo "  ✓ Original build.tar.gz cleaned up."
+
+                    # 清理旧备份文件，只保留最近的两份
+                    echo "  🧹 Cleaning up old backup files (keeping latest 2)..."
+                    ls -t build-backup-*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm || true
+                    echo "  ✅ Backup cleanup completed."
+                else
+                    echo "  ⚠️ No build.tar.gz found for backup."
+                fi
+                echo ""
+
+                echo "🧹 Docker Cleanup Phase:"
                 echo "  🗑️ Cleaning up old Docker images..."
 
                 # 删除除了 current 和 previous 之外的所有旧镜像
@@ -453,7 +454,7 @@ jobs:
                 echo "Docker Image: $NEW_IMAGE_TAG"
                 echo "Status: All systems operational"
                 echo "Health Check: ✅ PASSED"
-                echo "Backup Available: ✅ $PREVIOUS_BACKUP"
+                echo "Backup Available: ✅ $VERSION_BACKUP"
                 echo "Previous Image: ✅ $PREVIOUS_IMAGE_TAG"
                 echo "=================================================="
                 exit 0
