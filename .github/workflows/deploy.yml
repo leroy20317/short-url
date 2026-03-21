@@ -4,18 +4,18 @@ on:
   # 手动触发
   workflow_dispatch:
   # 自动触发
-  push:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'public/**'
-      - 'next.config.js'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'Dockerfile'
-      - 'docker-compose.yaml'
-  pull_request:
-    branches: [main]
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - 'src/**'
+  #     - 'public/**'
+  #     - 'next.config.js'
+  #     - 'package.json'
+  #     - 'pnpm-lock.yaml'
+  #     - 'Dockerfile'
+  #     - 'docker-compose.yaml'
+  # pull_request:
+  #   branches: [main]
 
 jobs:
   build:
